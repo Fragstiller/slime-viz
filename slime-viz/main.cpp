@@ -8,9 +8,11 @@
 
 #include "ShaderProgramBuilder.hpp"
 
-constexpr int WINDOW_WIDTH = 800;
-constexpr int WINDOW_HEIGHT = 600;
+constexpr int WINDOW_WIDTH = 512;
+constexpr int WINDOW_HEIGHT = 512;
 constexpr bool WINDOW_RESIZEABLE = false;
+
+constexpr int MAIN_TEX_SIZE = 512;
 
 using namespace nonstd;
 
@@ -74,14 +76,14 @@ int main() {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 512, 512, 0, GL_RGBA, GL_FLOAT, nullptr);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, MAIN_TEX_SIZE, MAIN_TEX_SIZE, 0, GL_RGBA, GL_FLOAT, nullptr);
 	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
 	float vertices[] = {
-		 0.5f,  0.5f, 0.0f,  1.0f, 1.0f,
-		 0.5f, -0.5f, 0.0f,  1.0f, 0.0f,
-		-0.5f, -0.5f, 0.0f,  0.0f, 0.0f,
-		-0.5f,  0.5f, 0.0f,  0.0f, 1.0f
+		 1.0f,  1.0f, 0.0f,  1.0f, 1.0f,
+		 1.0f, -1.0f, 0.0f,  1.0f, 0.0f,
+		-1.0f, -1.0f, 0.0f,  0.0f, 0.0f,
+		-1.0f,  1.0f, 0.0f,  0.0f, 1.0f
 	};
 	unsigned int indices[] = {
 		0, 1, 3,
@@ -96,6 +98,15 @@ int main() {
 
 	unsigned int EBO;
 	glGenBuffers(1, &EBO);
+
+	unsigned int SSBO;
+	glGenBuffers(1, &SSBO);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
+
+	float testData[4] = {0.5f, 0.5f, 0.5f, 1.0f};
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(testData), testData, GL_DYNAMIC_COPY);
+
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, SSBO);
 
 	glBindVertexArray(VAO);
 
@@ -153,7 +164,6 @@ int main() {
 
 		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
-		glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		glUseProgram(*shaderProgram);
 		glActiveTexture(GL_TEXTURE0);

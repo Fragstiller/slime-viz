@@ -1,10 +1,13 @@
 #version 430
 layout (local_size_x = 1, local_size_y = 1) in;
 layout (rgba32f, binding = 0) uniform image2D imageOutput;
+layout (std430, binding = 1) buffer SSBO {
+	vec4 data;
+};
 
 void main() {
-	vec4 pixel = vec4(1.0, 0.0, 0.0, 1.0);
 	ivec2 pixelCoords = ivec2(gl_GlobalInvocationID.xy);
+	vec4 pixel = vec4(pixelCoords.x / 512.0, pixelCoords.y / 512.0, 0.0, 1.0) * data;
 
 	imageStore(imageOutput, pixelCoords, pixel);
 }
