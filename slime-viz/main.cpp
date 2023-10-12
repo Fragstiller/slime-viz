@@ -5,7 +5,6 @@
 #include <sstream>
 
 #include "expected.hpp";
-#include "stb_image.h"
 
 #include "ShaderProgramBuilder.hpp"
 
@@ -14,73 +13,6 @@ constexpr int WINDOW_HEIGHT = 600;
 constexpr bool WINDOW_RESIZEABLE = false;
 
 using namespace nonstd;
-
-expected<unsigned int, std::string> createShaderProgram(std::string vertexShaderPath, std::string fragmentShaderPath) {
-	std::ifstream vertexShaderStream (vertexShaderPath);
-	std::stringstream vertexShaderStringStream;
-	std::string vertexShaderString;
-	if (vertexShaderStream.is_open()) {
-		vertexShaderStringStream << vertexShaderStream.rdbuf();
-		vertexShaderString = vertexShaderStringStream.str();
-	}
-	else return make_unexpected("failed to open vertex shader file\n");
-	vertexShaderStream.close();
-	auto vertexShaderCString = vertexShaderString.c_str();
-
-	std::ifstream fragmentShaderStream (fragmentShaderPath);
-	std::stringstream fragmentShaderStringStream;
-	std::string fragmentShaderString;
-	if (fragmentShaderStream.is_open()) {
-		fragmentShaderStringStream << fragmentShaderStream.rdbuf();
-		fragmentShaderString = fragmentShaderStringStream.str();
-	}
-	else return make_unexpected("failed to open fragment shader file\n");
-	fragmentShaderStream.close();
-	auto fragmentShaderCString = fragmentShaderString.c_str();
-
-	int success;
-	char infoLog[512];
-
-	unsigned int vertexShader;
-	vertexShader = glCreateShader(GL_VERTEX_SHADER);
-	glShaderSource(vertexShader, 1, &vertexShaderCString, nullptr);
-	glCompileShader(vertexShader);
-
-	glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
-	if (!success) {
-		glGetShaderInfoLog(vertexShader, 512, nullptr, infoLog);
-		return make_unexpected(infoLog);
-	}
-
-	unsigned int fragmentShader;
-	fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-	glShaderSource(fragmentShader, 1, &fragmentShaderCString, nullptr);
-	glCompileShader(fragmentShader);
-
-	glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
-	if (!success) {
-		glGetShaderInfoLog(fragmentShader, 512, nullptr, infoLog);
-		return make_unexpected(infoLog);
-	}
-
-	unsigned int shaderProgram;
-	shaderProgram = glCreateProgram();
-
-	glAttachShader(shaderProgram, vertexShader);
-	glAttachShader(shaderProgram, fragmentShader);
-	glLinkProgram(shaderProgram);
-
-	glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
-	if (!success) {
-		glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
-		return make_unexpected(infoLog);
-	}
-
-	glDeleteShader(vertexShader);
-	glDeleteShader(fragmentShader);
-
-	return shaderProgram;
-}
 
 void framebufferSizeCallback(GLFWwindow* window, int width, int height) {
 	glViewport(0, 0, width, height);
@@ -142,20 +74,8 @@ int main() {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-	stbi_set_flip_vertically_on_load(true);
-
-	int width, height, nrChannels;
-	unsigned char* data = stbi_load("container.jpg", &width, &height, &nrChannels, 0);
-	if (data) {
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
-	}
-	else {
-		printf("failed to load texture\n");
-	}
-	stbi_image_free(data);
-
-	//glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 512, 512, 0, GL_RGBA, GL_FLOAT, nullptr);
-	//glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, 512, 512, 0, GL_RGBA, GL_FLOAT, nullptr);
+	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
 
 	float vertices[] = {
 		 0.5f,  0.5f, 0.0f,  1.0f, 1.0f,
@@ -195,12 +115,31 @@ int main() {
 	glBindVertexArray(0);
 
 	auto shaderProgramBuilder = ShaderProgramBuilder();
-	shaderProgramBuilder.attachShader(GL_VERTEX_SHADER, "shader.vert");
-	shaderProgramBuilder.attachShader(GL_FRAGMENT_SHADER, "shader.frag");
+	auto vertexResult = shaderProgramBuilder.attachShader(GL_VERTEX_SHADER, "shader.vert");
+	if (!vertexResult) {
+		printf(vertexResult.error().c_str());
+		return -1;
+	}
+	auto fragmentResult = shaderProgramBuilder.attachShader(GL_FRAGMENT_SHADER, "shader.frag");
+	if (!fragmentResult) {
+		printf(fragmentResult.error().c_str());
+		return -1;
+	}
 	auto shaderProgram = shaderProgramBuilder.getShaderProgram();
 	if (!shaderProgram) {
 		printf(shaderProgram.error().c_str());
 		return -1;
+	}
+
+	auto computeShaderProgramBuilder = ShaderProgramBuilder();
+	auto computeResult = computeShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "shader.comp");
+	if (!computeResult) {
+		printf(computeResult.error().c_str());
+		return -1;
+	}
+	auto computeShaderProgram = computeShaderProgramBuilder.getShaderProgram();
+	if (!computeShaderProgram) {
+		printf(computeShaderProgram.error().c_str());
 	}
 
 	glUseProgram(*shaderProgram);
@@ -208,6 +147,11 @@ int main() {
 
 	while (!glfwWindowShouldClose(window)) {
 		processInput(window);
+
+		glUseProgram(*computeShaderProgram);
+		glDispatchCompute(512, 512, 1);
+
+		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 		glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);

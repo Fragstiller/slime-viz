@@ -30,7 +30,9 @@ public:
 	}
 
 	expected<void, std::string> attachShader(GLenum shaderType, const std::string& path) {
-		linked = false;
+		if (linked) {
+			make_unexpected("tried to attach shader after linking");
+		}
 
 		std::ifstream shaderStream (path);
 		std::stringstream shaderStringStream;
