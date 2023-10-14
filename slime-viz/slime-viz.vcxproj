@@ -137,14 +137,18 @@
     <ClCompile Include="stb_image.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ApplicationBase.hpp" />
     <ClInclude Include="expected.hpp" />
     <ClInclude Include="ShaderProgramBuilder.hpp" />
+    <ClInclude Include="SlimeSimulation.hpp" />
     <ClInclude Include="stb_image.h" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="shader.comp" />
+    <None Include="copy.comp" />
+    <None Include="diffuse.comp" />
     <None Include="shader.frag" />
     <None Include="shader.vert" />
+    <None Include="update.comp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="container.jpg" />

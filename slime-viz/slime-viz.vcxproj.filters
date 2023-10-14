@@ -35,6 +35,12 @@
     <ClInclude Include="expected.hpp">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="ApplicationBase.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
+    <ClInclude Include="SlimeSimulation.hpp">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="shader.vert">
@@ -43,7 +49,13 @@
     <None Include="shader.frag">
       <Filter>Исходные файлы</Filter>
     </None>
-    <None Include="shader.comp">
+    <None Include="diffuse.comp">
+      <Filter>Исходные файлы</Filter>
+    </None>
+    <None Include="update.comp">
+      <Filter>Исходные файлы</Filter>
+    </None>
+    <None Include="copy.comp">
       <Filter>Исходные файлы</Filter>
     </None>
   </ItemGroup>

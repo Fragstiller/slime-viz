@@ -1,8 +1,12 @@
+#define _USE_MATH_DEFINES
+
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <cstdlib>
+#include <math.h>
 
 #include "expected.hpp";
 
@@ -26,7 +30,23 @@ void processInput(GLFWwindow* window) {
 	}
 }
 
+float randomFloat(float lo, float hi) {
+	return lo + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (hi - lo)));
+}
+
+int randomInt(int lo, int hi) {
+	return rand() % (lo - hi + 1) + lo;
+}
+
+struct Agent {
+	float position[2];
+	float angle;
+	float padding;
+};
+
 int main() {
+	srand(static_cast<unsigned>(time(0)));
+
 	glfwInit();
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
 	glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -77,7 +97,20 @@ int main() {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, MAIN_TEX_SIZE, MAIN_TEX_SIZE, 0, GL_RGBA, GL_FLOAT, nullptr);
-	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F);
+	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+
+	unsigned int diffuseTexture;
+	glGenTextures(1, &diffuseTexture);
+	glActiveTexture(GL_TEXTURE1);
+	glBindTexture(GL_TEXTURE_2D, diffuseTexture);
+
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, MAIN_TEX_SIZE, MAIN_TEX_SIZE, 0, GL_RGBA, GL_FLOAT, nullptr);
+	glBindImageTexture(2, diffuseTexture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
 
 	float vertices[] = {
 		 1.0f,  1.0f, 0.0f,  1.0f, 1.0f,
@@ -103,8 +136,14 @@ int main() {
 	glGenBuffers(1, &SSBO);
 	glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
 
-	float testData[4] = {0.5f, 0.5f, 0.5f, 1.0f};
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(testData), testData, GL_DYNAMIC_COPY);
+	const int agentCount = 10000;
+	Agent agents[agentCount];
+	for (int i = 0; i < agentCount; i++) {
+		agents[i].position[0] = randomInt(0, 512);
+		agents[i].position[1] = randomInt(0, 512);
+		agents[i].angle = randomFloat(0.0f, M_PI * 2);
+	}
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(agents), agents, GL_DYNAMIC_COPY);
 
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, SSBO);
 
@@ -143,7 +182,7 @@ int main() {
 	}
 
 	auto computeShaderProgramBuilder = ShaderProgramBuilder();
-	auto computeResult = computeShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "shader.comp");
+	auto computeResult = computeShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "update.comp");
 	if (!computeResult) {
 		printf(computeResult.error().c_str());
 		return -1;
@@ -153,13 +192,49 @@ int main() {
 		printf(computeShaderProgram.error().c_str());
 	}
 
+	auto diffuseShaderProgramBuilder = ShaderProgramBuilder();
+	auto diffuseResult = diffuseShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "diffuse.comp");
+	if (!diffuseResult) {
+		printf(diffuseResult.error().c_str());
+		return -1;
+	}
+	auto diffuseShaderProgram = diffuseShaderProgramBuilder.getShaderProgram();
+	if (!diffuseShaderProgram) {
+		printf(diffuseShaderProgram.error().c_str());
+	}
+
+	auto copyShaderProgramBuilder = ShaderProgramBuilder();
+	auto copyResult = copyShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "copy.comp");
+	if (!copyResult) {
+		printf(copyResult.error().c_str());
+		return -1;
+	}
+	auto copyShaderProgram = copyShaderProgramBuilder.getShaderProgram();
+	if (!copyShaderProgram) {
+		printf(copyShaderProgram.error().c_str());
+	}
+
 	glUseProgram(*shaderProgram);
 	glUniform1i(glGetUniformLocation(*shaderProgram, "texture0"), 0);
 
+	int frames = 0;
 	while (!glfwWindowShouldClose(window)) {
+		frames++;
+
 		processInput(window);
 
 		glUseProgram(*computeShaderProgram);
+		glUniform1ui(glGetUniformLocation(*computeShaderProgram, "time"), frames);
+		glDispatchCompute(agentCount, 1, 1);
+
+		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+		glUseProgram(*diffuseShaderProgram);
+		glDispatchCompute(512, 512, 1);
+
+		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+
+		glUseProgram(*copyShaderProgram);
 		glDispatchCompute(512, 512, 1);
 
 		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);

@@ -1,0 +1,93 @@
+#version 430
+layout (local_size_x = 1) in;
+layout (rgba32f, binding = 0) uniform image2D imageOutput;
+
+uniform uint time;
+
+const float PI = 3.1415926535897932384626433832795;
+const float PI_2 = 1.57079632679489661923;
+
+struct Agent {
+	vec2 position;
+    float angle;
+};
+
+layout (std430, binding = 1) buffer SSBO {
+	Agent agents[];
+};
+
+// Hash function www.cs.ubc.ca/~rbridson/docs/schechter-sca08-turbulence.pdf
+uint hash(uint state) {
+    state ^= 2747636419u;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    return state;
+}
+
+float scaleToRange01(uint state) {
+    return float(state) / 4294967295.0;
+}
+
+float sense(Agent agent, float sensorAngleOffset) {
+    int sensorSize = 1;
+    float sensorAngle = agent.angle + sensorAngleOffset;
+    vec2 sensorDir = vec2(cos(sensorAngle), sin(sensorAngle));
+
+    vec2 sensorPos = agent.position + sensorDir * 5.0;
+    int sensorCenterX = int(sensorPos.x);
+    int sensorCenterY = int(sensorPos.y);
+
+    float sum = 0;
+
+    for (int offsetX = -sensorSize; offsetX <= sensorSize; offsetX++) {
+        for (int offsetY = -sensorSize; offsetY <= sensorSize; offsetY++) {
+            int sampleX = min(512 - 1, max(0, sensorCenterX + offsetX));
+            int sampleY = min(512 - 1, max(0, sensorCenterY + offsetY));
+            sum += dot(vec4(1.0, 1.0, 1.0, 1.0), imageLoad(imageOutput, ivec2(sampleX, sampleY)));
+        }
+    }
+
+    return sum;
+}
+
+void main() {
+    uint ID = gl_GlobalInvocationID.x;
+    Agent agent = agents[ID];
+
+    uint random = hash(time * 100000 + uint(agent.position.x + agent.position.y * 512) + ID);
+
+    float sensorAngleRad = 45.0 * (PI / 180.0);
+    float weightForward = sense(agent, 0);
+    float weightLeft = sense(agent, sensorAngleRad);
+    float weightRight = sense(agent, -sensorAngleRad);
+
+    float randomSteerStrength = scaleToRange01(random);
+    float turnSpeed = 0.03 * 2.0 * PI;
+
+    if (weightForward < weightLeft && weightForward < weightRight) {
+        agent.angle += (randomSteerStrength - 0.5) * 2.0 * turnSpeed;
+    }
+    else if (weightRight > weightLeft) {
+        agent.angle -= randomSteerStrength * turnSpeed;
+    }
+    else if (weightLeft > weightRight) {
+        agent.angle += randomSteerStrength * turnSpeed;
+    }
+
+    vec2 direction = vec2(cos(agent.angle), sin(agent.angle));
+
+    agent.position += direction;
+    if (agent.position.x >= 512 || agent.position.x < 0 || agent.position.y >= 512 || agent.position.y < 0) {
+        agent.angle = scaleToRange01(random) * PI * 2;
+        agent.position.x = min(512 - 1, max(0, agent.position.x));
+        agent.position.y = min(512 - 1, max(0, agent.position.y));
+    }
+
+	imageStore(imageOutput, ivec2(agent.position), vec4(1.0, 1.0, 0.0, 1.0));
+
+    agents[ID].position = agent.position;
+    agents[ID].angle = agent.angle;
+}
