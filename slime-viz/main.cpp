@@ -1,22 +1,16 @@
-#define _USE_MATH_DEFINES
-
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
-#include <math.h>
 
 #include "expected.hpp";
 
 #include "ShaderProgramBuilder.hpp"
+#include "SlimeSimulation.hpp"
 
-constexpr int WINDOW_WIDTH = 512;
-constexpr int WINDOW_HEIGHT = 512;
 constexpr bool WINDOW_RESIZEABLE = false;
-
-constexpr int MAIN_TEX_SIZE = 512;
 
 using namespace nonstd;
 
@@ -30,20 +24,6 @@ void processInput(GLFWwindow* window) {
 	}
 }
 
-float randomFloat(float lo, float hi) {
-	return lo + static_cast<float>(rand()) / (static_cast<float>(RAND_MAX / (hi - lo)));
-}
-
-int randomInt(int lo, int hi) {
-	return rand() % (lo - hi + 1) + lo;
-}
-
-struct Agent {
-	float position[2];
-	float angle;
-	float padding;
-};
-
 int main() {
 	srand(static_cast<unsigned>(time(0)));
 
@@ -53,7 +33,9 @@ int main() {
 	glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 	glfwWindowHint(GLFW_RESIZABLE, (int)WINDOW_RESIZEABLE);
 
-	const auto window = glfwCreateWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "slime-viz", nullptr, nullptr);
+	SlimeSimulation application = SlimeSimulation();
+
+	const auto window = glfwCreateWindow(application.getWindowWidth(), application.getWindowHeight(), "slime-viz", nullptr, nullptr);
 	if (window == 0) {
 		printf("GLFW init failed\n");
 		return -1;
@@ -83,34 +65,10 @@ int main() {
 	glGetIntegerv(GL_MAX_COMPUTE_WORK_GROUP_INVOCATIONS, &workGroupInv);
 	printf("max local work group invocations %i\n", workGroupInv);
 
-	glViewport(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
+	glViewport(0, 0, application.getWindowWidth(), application.getWindowHeight());
 	glfwSetFramebufferSizeCallback(window, framebufferSizeCallback);
 
-	unsigned int texture;
-	glGenTextures(1, &texture);
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D, texture);
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, MAIN_TEX_SIZE, MAIN_TEX_SIZE, 0, GL_RGBA, GL_FLOAT, nullptr);
-	glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
-
-	unsigned int diffuseTexture;
-	glGenTextures(1, &diffuseTexture);
-	glActiveTexture(GL_TEXTURE1);
-	glBindTexture(GL_TEXTURE_2D, diffuseTexture);
-
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, MAIN_TEX_SIZE, MAIN_TEX_SIZE, 0, GL_RGBA, GL_FLOAT, nullptr);
-	glBindImageTexture(2, diffuseTexture, 0, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F);
+	application.setupTextures();
 
 	float vertices[] = {
 		 1.0f,  1.0f, 0.0f,  1.0f, 1.0f,
@@ -132,20 +90,7 @@ int main() {
 	unsigned int EBO;
 	glGenBuffers(1, &EBO);
 
-	unsigned int SSBO;
-	glGenBuffers(1, &SSBO);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, SSBO);
-
-	const int agentCount = 10000;
-	Agent agents[agentCount];
-	for (int i = 0; i < agentCount; i++) {
-		agents[i].position[0] = randomInt(0, 512);
-		agents[i].position[1] = randomInt(0, 512);
-		agents[i].angle = randomFloat(0.0f, M_PI * 2);
-	}
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(agents), agents, GL_DYNAMIC_COPY);
-
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, SSBO);
+	application.setupSSBO();
 
 	glBindVertexArray(VAO);
 
@@ -181,73 +126,33 @@ int main() {
 		return -1;
 	}
 
-	auto computeShaderProgramBuilder = ShaderProgramBuilder();
-	auto computeResult = computeShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "update.comp");
-	if (!computeResult) {
-		printf(computeResult.error().c_str());
+	auto applicationShadersResult = application.setupShaders();
+	if (!applicationShadersResult) {
+		printf(applicationShadersResult.error().c_str());
 		return -1;
-	}
-	auto computeShaderProgram = computeShaderProgramBuilder.getShaderProgram();
-	if (!computeShaderProgram) {
-		printf(computeShaderProgram.error().c_str());
-	}
-
-	auto diffuseShaderProgramBuilder = ShaderProgramBuilder();
-	auto diffuseResult = diffuseShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "diffuse.comp");
-	if (!diffuseResult) {
-		printf(diffuseResult.error().c_str());
-		return -1;
-	}
-	auto diffuseShaderProgram = diffuseShaderProgramBuilder.getShaderProgram();
-	if (!diffuseShaderProgram) {
-		printf(diffuseShaderProgram.error().c_str());
-	}
-
-	auto copyShaderProgramBuilder = ShaderProgramBuilder();
-	auto copyResult = copyShaderProgramBuilder.attachShader(GL_COMPUTE_SHADER, "copy.comp");
-	if (!copyResult) {
-		printf(copyResult.error().c_str());
-		return -1;
-	}
-	auto copyShaderProgram = copyShaderProgramBuilder.getShaderProgram();
-	if (!copyShaderProgram) {
-		printf(copyShaderProgram.error().c_str());
 	}
 
 	glUseProgram(*shaderProgram);
 	glUniform1i(glGetUniformLocation(*shaderProgram, "texture0"), 0);
 
-	int frames = 0;
-	while (!glfwWindowShouldClose(window)) {
-		frames++;
+	int frame = 0;
 
+	while (!glfwWindowShouldClose(window)) {
 		processInput(window);
 
-		glUseProgram(*computeShaderProgram);
-		glUniform1ui(glGetUniformLocation(*computeShaderProgram, "time"), frames);
-		glDispatchCompute(agentCount, 1, 1);
-
-		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-		glUseProgram(*diffuseShaderProgram);
-		glDispatchCompute(512, 512, 1);
-
-		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
-
-		glUseProgram(*copyShaderProgram);
-		glDispatchCompute(512, 512, 1);
-
-		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+		application.run(frame);
 
 		glClear(GL_COLOR_BUFFER_BIT);
 		glUseProgram(*shaderProgram);
 		glActiveTexture(GL_TEXTURE0);
-		glBindTexture(GL_TEXTURE_2D, texture);
+		glBindTexture(GL_TEXTURE_2D, application.getMainTexture());
 		glBindVertexArray(VAO);
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		
 		glfwSwapBuffers(window);
 		glfwPollEvents();
+
+		frame++;
 	}
 
 	glDeleteVertexArrays(1, &VAO);
